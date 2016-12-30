@@ -29,6 +29,13 @@ from fileinput import filename
 import argparse
 import zipfile
 
+def valid_date(s, fmt = "%Y-%m-%d"):
+    try:
+        return datetime.strptime(s, fmt)
+    except ValueError:
+        msg = "Not a valid date: '{0}'.".format(s)
+        raise argparse.ArgumentTypeError(msg)
+
 script_version = '1.0.0'
 current_date = datetime.now().strftime('%Y-%m-%d')
 activities_directory = './' + current_date + '_garmin_connect_export'
@@ -53,6 +60,14 @@ parser.add_argument('-d', '--directory', nargs='?', default=activities_directory
 parser.add_argument('-u', '--unzip',
 	help="if downloading ZIP files (format: 'original'), unzip the file and removes the ZIP file",
 	action="store_true")
+
+parser.add_argument('-s', "--startdate",
+                    help="start date (format YYYY-MM-DD) of activities to download",
+                    type=valid_date)
+
+parser.add_argument('-e', "--enddate",
+                    help="end date (format YYYY-MM-DD) of activities to download",
+                    type=valid_date)
 
 args = parser.parse_args()
 
@@ -309,6 +324,18 @@ while total_downloaded < total_to_download:
 
 	# Process each activity.
 	for a in activities:
+		if args.startdate:
+			actualdate = args.startdate if 'BeginTimestamp' not in a['activity']['activitySummary'] \
+				else valid_date(a['activity']['activitySummary']['BeginTimestamp']['value'], "%Y-%m-%dT%H:%M:%S.000Z")
+			if actualdate < args.startdate:
+				continue
+
+		if args.enddate:
+			actualdate = args.enddate if 'EndTimestamp' not in a['activity']['activitySummary'] \
+				else valid_date(a['activity']['activitySummary']['EndTimestamp']['value'], "%Y-%m-%dT%H:%M:%S.000Z")
+			if actualdate > args.enddate:
+				continue
+
 		# Display which entry we're working on.
 		print 'Garmin Connect activity: [' + str(a['activity']['activityId']) + ']',
 		print a['activity']['activityName']
