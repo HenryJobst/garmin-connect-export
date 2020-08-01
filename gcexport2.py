@@ -20,6 +20,7 @@ from os.path import isdir
 from os.path import isfile
 from os import mkdir
 from os import remove
+from os import stat
 from xml.dom.minidom import parseString
 from subprocess import call
 
@@ -97,8 +98,13 @@ def http_req(url, post=None, headers={}):
 
 	# N.B. urllib2 will follow any 302 redirects. Also, the "open" call above may throw a urllib2.HTTPError which is checked for below.
 	# print response.getcode()
-	if response.getcode() != 200:
-		raise Exception('Bad return code (' + response.getcode() + ') for: ' + url)
+	if response.getcode() == 204:
+		# For activities without GPS coordinates, there is no GPX download (204 = no content).
+		# Write an empty file to prevent redownloading it.
+		print 'Writing empty file since there was no GPX activity data...',
+		return ''
+	elif response.getcode() != 200:
+		raise Exception('Bad return code (' + str(response.getcode()) + ') for: ' + url)
 
 	return response.read()
 
@@ -154,10 +160,6 @@ url_gc_search    = 'http://connect.garmin.com/proxy/activity-search-service-1.2/
 url_gc_gpx_activity = 'https://connect.garmin.com/modern/proxy/download-service/export/gpx/activity/'
 url_gc_tcx_activity = 'https://connect.garmin.com/modern/proxy/download-service/export/tcx/activity/'
 url_gc_original_activity = 'http://connect.garmin.com/proxy/download-service/files/activity/'
-# url_gc_login     = 'https://sso.garmin.com/sso/login?service=https%3A%2F%2Fconnect.garmin.com%2Fpost-auth%2Flogin&webhost=olaxpw-connect04&source=https%3A%2F%2Fconnect.garmin.com%2Fen-US%2Fsignin&redirectAfterAccountLoginUrl=https%3A%2F%2Fconnect.garmin.com%2Fpost-auth%2Flogin&redirectAfterAccountCreationUrl=https%3A%2F%2Fconnect.garmin.com%2Fpost-auth%2Flogin&gauthHost=https%3A%2F%2Fsso.garmin.com%2Fsso&locale=en_US&id=gauth-widget&cssUrl=https%3A%2F%2Fstatic.garmincdn.com%2Fcom.garmin.connect%2Fui%2Fcss%2Fgauth-custom-v1.1-min.css&clientId=GarminConnect&rememberMeShown=true&rememberMeChecked=false&createAccountShown=true&openCreateAccount=false&usernameShown=false&displayNameShown=false&consumeServiceTicket=false&initialFocus=true&embedWidget=false&generateExtraServiceTicket=false'
-# url_gc_search    = 'http://connect.garmin.com/proxy/activity-search-service-1.0/json/activities?'
-# url_gc_gpx_activity = 'http://connect.garmin.com/proxy/activity-service-1.2/gpx/activity/'
-# url_gc_tcx_activity = 'http://connect.garmin.com/proxy/activity-service-1.2/tcx/activity/'
 
 # Initially, we need to get a valid session cookie, so we pull the login page.
 print 'Request login page'
@@ -397,7 +399,7 @@ while total_downloaded < total_to_download:
 				print 'Writing empty file since there was no original activity data...',
 				data = ''
 			else:
-				raise Exception('Failed. Got an unexpected HTTP error (' + str(e.code) + ').')
+				raise Exception('Failed. Got an unexpected HTTP error (' + str(e.code) + download_url +').')
 
 		save_file = open(data_filename, file_mode)
 		save_file.write(data)
@@ -473,9 +475,9 @@ while total_downloaded < total_to_download:
 
 		csv_file.write(csv_record.encode('utf8'))
 
-		if args.format == 'gpx':
+		if args.format == 'gpx' and data:
 			# Validate GPX data. If we have an activity without GPS data (e.g., running on a treadmill),
-			# Garmin Connect still kicks out a GPX, but there is only activity information, no GPS data.
+			# Garmin Connect still kicks out a GPX (sometimes), but there is only activity information, no GPS data.
 			# N.B. You can omit the XML parse (and the associated log messages) to speed things up.
 			gpx = parseString(data)
 			gpx_data_exists = len(gpx.getElementsByTagName('trkpt')) > 0
@@ -487,11 +489,15 @@ while total_downloaded < total_to_download:
 		elif args.format == 'original':
 			if args.unzip and data_filename[-3:].lower() == 'zip':  # Even manual upload of a GPX file is zipped, but we'll validate the extension.
 				print "Unzipping and removing original files...",
-				zip_file = open(data_filename, 'rb')
-				z = zipfile.ZipFile(zip_file)
-				for name in z.namelist():
-					z.extract(name, args.directory)
-				zip_file.close()
+				print 'Filesize is: ' + str(stat(data_filename).st_size)
+				if stat(data_filename).st_size > 0:
+					zip_file = open(data_filename, 'rb')
+					z = zipfile.ZipFile(zip_file)
+					for name in z.namelist():
+						z.extract(name, args.directory)
+					zip_file.close()
+				else:
+					print 'Skipping 0Kb zip file.'
 				remove(data_filename)
 			print 'Done.'
 		else:
